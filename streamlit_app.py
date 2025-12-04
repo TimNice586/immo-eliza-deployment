@@ -21,7 +21,7 @@ province = st.selectbox("Province", options=region_to_provinces[region])
 auto_region = province_to_region[province]
 
 if region != auto_region:
-    st.warning(f"⚠️ Province '{province}' belongs to region '{auto_region}'. Region corrected automatically.")
+    st.warning(f"Province '{province}' belongs to region '{auto_region}'. Region corrected automatically.")
     region = auto_region
 
 # Other fields
@@ -33,6 +33,7 @@ swimming_pool = st.checkbox("Swimming Pool")
 open_fire = st.checkbox("Open Fire")
 terrace = st.checkbox("Terrace")
 facades = st.selectbox("Facades", options=[1, 2, 3, 4])
+types = st.selectbox("Type of Property", options=["House", "Apartment"])
 
 required_cols = {
     'living_area (m²)', 'number_of_bedrooms', 'equiped_kitchen (yes:1, no:0)',
@@ -58,7 +59,9 @@ if st.button("Predict Price"):
         "terrace (yes:1, no:0)": int(terrace),
         "region": region,
         "province": province,
-        "number_facades": facades
+        "number_facades": facades,
+        "open_fire (yes:1, no:0)": open_fire,
+        "type": types
     }
     
     input_data = ensure_all_features(input_data)
