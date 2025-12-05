@@ -1,10 +1,12 @@
 import streamlit as st
 import numpy as np
 from predict import predict
+import ast
+import unicodedata
 
 st.title("Immo Eliza Price Predictor")
 
-#provinces are subtypes of regions
+# Provinces are subtypes of regions
 region_to_provinces = {
     "Flanders": ["Antwerp", "Limburg", "East-Flanders", "West-Flanders", "Flemish-Brabant"],
     "Wallonia": ["Hainaut", "Liège", "Namur", "Brabant-Wallon", "Luxembourg"],
@@ -14,7 +16,8 @@ region_to_provinces = {
 province_to_region = {
     prov: reg for reg, provs in region_to_provinces.items() for prov in provs
 }
-#subtypes are part of types
+
+# Subtypes are part of types
 type_to_subtypes = {
     "House": [
         "Residence", "Villa", "Mixed building", "Chalet",
@@ -44,9 +47,8 @@ postal_to_province = {
     "Luxembourg": range(6600, 7000),
     "Brabant-Wallon": range(1300, 1500)
 }
-st.subheader("Place of Property")
 
-import ast
+st.subheader("Place of Property")
 
 # Load municipality→postal mapping file
 with open("message.txt", "r", encoding="utf-8") as f:
@@ -59,14 +61,11 @@ for muni, codes in muni_to_postal.items():
     for code in codes:
         postal_to_municipalities.setdefault(code, []).append(nice_name)
 
-
-import unicodedata
-
+# Normalize text
 def normalize(text: str):
-    """Lowercase + remove accents for flexible matching."""
     return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii").lower().strip()
 
-# Synonyms for major cities (EN/NL/FR)
+# Synonyms
 municipality_aliases = {
     "ghent": "gent",
     "antwerp": "antwerpen",
@@ -76,29 +75,19 @@ municipality_aliases = {
     "luik": "liège"
 }
 
-# Lookup map from normalized names back to real keys
 normalized_muni_map = {normalize(m): m for m in muni_to_postal.keys()}
 
 def resolve_municipality(user_input):
     text = normalize(user_input)
-
-    # Replace known synonyms first
     text = municipality_aliases.get(text, text)
-
-    # Exact normalized match → direct success
     if text in normalized_muni_map:
         real_name = normalized_muni_map[text]
         return real_name, muni_to_postal[real_name]
-
-    # Partial match fallback
     matches = [real for norm, real in normalized_muni_map.items() if text in norm]
     if matches:
-        matches_sorted = sorted(matches)
-        main_choice = matches_sorted[0]  # Option B: auto-pick alphabetically first
+        main_choice = sorted(matches)[0]
         return main_choice, muni_to_postal[main_choice]
-
     return None, None
-
 
 # ---------- UI Logic ----------
 user_input = st.text_input("Postal code or Municipality", placeholder="e.g. 9000 or Gent")
@@ -113,10 +102,9 @@ if user_input:
         postal_code = int(user_input)
         municipalities = sorted(postal_to_municipalities.get(postal_code, []))
         if municipalities:
-            municipality = municipalities[0]  # Option B rule
+            municipality = municipalities[0]
         else:
             st.warning("Postal code valid but municipality unknown.")
-
     else:
         municipality_result, postal_list = resolve_municipality(user_input)
         if municipality_result:
@@ -125,20 +113,15 @@ if user_input:
         else:
             st.warning("Not recognized — check spelling or try postal code.")
 
-
-# Find province & region when postal is known
 if postal_code:
     province = next((prov for prov, codes in postal_to_province.items() if postal_code in codes), None)
     if province:
         region = province_to_region[province]
 
-
-# Display results (if complete)
 if municipality and province and region:
     st.success(f"{municipality} ({postal_code}) — {province}, {region}")
 
-
-
+# ---------- Property Type ----------
 st.subheader("Types of Property")
 
 type_list = list(type_to_subtypes.keys())
@@ -147,26 +130,40 @@ property_type = st.selectbox("Type", options=type_list)
 subtype_list = type_to_subtypes[property_type]
 subtype = st.selectbox("Subtype", options=subtype_list)
 
-# Auto-correct type if subtype changed afterwards
 correct_type = subtype_to_type[subtype]
 if property_type != correct_type:
     st.warning(f"Subtype '{subtype}' belongs to type '{correct_type}'. Type corrected automatically.")
     property_type = correct_type
 
+# ---------- Property Details ----------
 st.subheader("Property details")
 
-# Basic inputs
 living_area = st.number_input("Living Area (m²)", min_value=25, max_value=400000)
 bedrooms = st.number_input("Bedrooms", min_value=0, max_value=50)
 
-# Optional features with conditional inputs
+# Terrace with Unknown option
 terrace = st.checkbox("Terrace")
-terrace_area = st.number_input("Terrace Area (m²)", min_value=0, max_value=150) if terrace else None
+if terrace:
+    terrace_area_option = st.selectbox(
+        "Terrace Area (m²)",
+        options=["Unknown"] + list(range(0, 151))
+    )
+    terrace_area = None if terrace_area_option == "Unknown" else int(terrace_area_option)
+else:
+    terrace_area = None
 
+# Garden with Unknown option (optional)
 garden = st.checkbox("Garden")
-garden_area = st.number_input("Garden Area (m²)", min_value=0, max_value=300) if garden else None
+if garden:
+    garden_area_option = st.selectbox(
+        "Garden Area (m²)",
+        options=["Unknown"] + list(range(0, 301))
+    )
+    garden_area = None if garden_area_option == "Unknown" else int(garden_area_option)
+else:
+    garden_area = None
 
-swimming_pool = st.checkbox("Swimming Pool")  # no area needed, just boolean
+swimming_pool = st.checkbox("Swimming Pool")
 equiped_kitchen = st.checkbox("Equipped Kitchen")
 open_fire = st.checkbox("Open Fire")
 furnished = st.checkbox("Furnished")
@@ -179,6 +176,7 @@ state_of_building = st.selectbox(
 
 facades = st.selectbox("Facades", options=[1, 2, 3, 4])
 
+# ---------- Prediction ----------
 required_cols = {
     'living_area (m²)', 'number_of_bedrooms', 'equiped_kitchen (yes:1, no:0)',
     'swimming_pool (yes:1, no:0)', 'region', 'terrace (yes:1, no:0)',
@@ -190,30 +188,29 @@ required_cols = {
 def ensure_all_features(input_dict):
     for col in required_cols:
         if col not in input_dict:
-            input_dict[col] = None  # Let model pipeline handle imputing
+            input_dict[col] = None
     return input_dict
 
 if st.button("Predict Price"):
     input_data = {
-    "living_area (m²)": int(living_area),
-    "number_of_bedrooms": int(bedrooms),
-    "terrace_area (m²)": terrace_area,
-    "equiped_kitchen (yes:1, no:0)": int(equiped_kitchen),
-    "swimming_pool (yes:1, no:0)": int(swimming_pool),
-    "terrace (yes:1, no:0)": int(terrace),
-    "region": region,
-    "province": province,
-    "number_facades": facades,
-    "open_fire (yes:1, no:0)": int(open_fire),
-    "type": property_type,
-    "subtype": subtype,
-    "garden (yes:1, no:0)": int(garden),
-    "furnished (yes:1, no:0)": int(furnished),
-    "state_of_building": state_of_building,
-    "postal_code": postal_code
-}
+        "living_area (m²)": int(living_area),
+        "number_of_bedrooms": int(bedrooms),
+        "terrace_area (m²)": terrace_area,
+        "equiped_kitchen (yes:1, no:0)": int(equiped_kitchen),
+        "swimming_pool (yes:1, no:0)": int(swimming_pool),
+        "terrace (yes:1, no:0)": int(terrace),
+        "region": region,
+        "province": province,
+        "number_facades": facades,
+        "open_fire (yes:1, no:0)": int(open_fire),
+        "type": property_type,
+        "subtype": subtype,
+        "garden (yes:1, no:0)": int(garden),
+        "furnished (yes:1, no:0)": int(furnished),
+        "state_of_building": state_of_building,
+        "postal_code": postal_code
+    }
 
-    
     input_data = ensure_all_features(input_data)
     price = predict(input_data)
     st.success(f"Estimated price: € {price:,.0f}")
