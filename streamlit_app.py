@@ -47,79 +47,97 @@ postal_to_province = {
 st.subheader("Place of Property")
 
 import ast
-import pandas as pd
 
-# Load your municipality→postal mapping file
+# Load municipality→postal mapping file
 with open("message.txt", "r", encoding="utf-8") as f:
     muni_to_postal = ast.literal_eval(f.read())
 
-# Reverse mapping: postal_code → list of municipalities
+# Reverse mapping: postal→municipalities
 postal_to_municipalities = {}
 for muni, codes in muni_to_postal.items():
-    nice_name = muni.title()  # Beautify display name
+    nice_name = muni.title()
     for code in codes:
         postal_to_municipalities.setdefault(code, []).append(nice_name)
 
 
-st.subheader("Place of Property")
+import unicodedata
 
-# User postal input
-postal_input = st.text_input("Postal Code", placeholder="e.g. 9000")
+def normalize(text: str):
+    """Lowercase + remove accents for flexible matching."""
+    return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii").lower().strip()
+
+# Synonyms for major cities (EN/NL/FR)
+municipality_aliases = {
+    "ghent": "gent",
+    "antwerp": "antwerpen",
+    "brussels": "brussel",
+    "bruxelles": "brussel",
+    "liege": "liège",
+    "luik": "liège"
+}
+
+# Lookup map from normalized names back to real keys
+normalized_muni_map = {normalize(m): m for m in muni_to_postal.keys()}
+
+def resolve_municipality(user_input):
+    text = normalize(user_input)
+
+    # Replace known synonyms first
+    text = municipality_aliases.get(text, text)
+
+    # Exact normalized match → direct success
+    if text in normalized_muni_map:
+        real_name = normalized_muni_map[text]
+        return real_name, muni_to_postal[real_name]
+
+    # Partial match fallback
+    matches = [real for norm, real in normalized_muni_map.items() if text in norm]
+    if matches:
+        matches_sorted = sorted(matches)
+        main_choice = matches_sorted[0]  # Option B: auto-pick alphabetically first
+        return main_choice, muni_to_postal[main_choice]
+
+    return None, None
+
+
+# ---------- UI Logic ----------
+user_input = st.text_input("Postal code or Municipality", placeholder="e.g. 9000 or Gent")
 
 postal_code = None
-municipalities = []
 municipality = None
 province = None
 region = None
 
-# Validate + lookup
-if postal_input.isdigit() and 1000 <= int(postal_input) <= 9999:
-    postal_code = int(postal_input)
-    
-    # Lookup municipality
-    municipalities = postal_to_municipalities.get(postal_code, [])
-    if len(municipalities) == 1:
-        municipality = municipalities[0]
-    elif len(municipalities) > 1:
-        municipality = st.selectbox("Municipality", options=municipalities)
-    
-    # Lookup province via ranges
-    province = next(
-        (prov for prov, codes in postal_to_province.items() if postal_code in codes),
-        None
-    )
+if user_input:
+    if user_input.isdigit() and 1000 <= int(user_input) <= 9999:
+        postal_code = int(user_input)
+        municipalities = sorted(postal_to_municipalities.get(postal_code, []))
+        if municipalities:
+            municipality = municipalities[0]  # Option B rule
+        else:
+            st.warning("Postal code valid but municipality unknown.")
+
+    else:
+        municipality_result, postal_list = resolve_municipality(user_input)
+        if municipality_result:
+            municipality = municipality_result
+            postal_code = postal_list[0]
+        else:
+            st.warning("Not recognized — check spelling or try postal code.")
+
+
+# Find province & region when postal is known
+if postal_code:
+    province = next((prov for prov, codes in postal_to_province.items() if postal_code in codes), None)
     if province:
         region = province_to_region[province]
-else:
-    st.info("Enter a valid Belgian postal code (1000–9999).")
 
 
-# Allow user to correct mismatches manually
-manual_override = st.checkbox("Edit location details manually")
+# Display results (if complete)
+if municipality and province and region:
+    st.success(f"{municipality} ({postal_code}) — {province}, {region}")
 
-if manual_override:
-    # Region override
-    region_list = list(region_to_provinces.keys())
-    region = st.selectbox(
-        "Region",
-        region_list,
-        index=region_list.index(region) if region in region_list else 0
-    )
 
-    # Province filtered by region
-    province_list = region_to_provinces[region]
-    province = st.selectbox(
-        "Province",
-        province_list,
-        index=province_list.index(province) if province in province_list else 0
-    )
-else:
-    # Show auto results when ready
-    if postal_code and region and province:
-        if municipality:
-            st.success(f"{municipality} in {province}, {region}")
-        else:
-            st.warning("Municipality not found in list — adjust manually if needed.")
 
 st.subheader("Types of Property")
 
