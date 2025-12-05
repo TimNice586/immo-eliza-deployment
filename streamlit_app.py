@@ -46,49 +46,81 @@ postal_to_province = {
 }
 st.subheader("Place of Property")
 
-# Postal code input with filtering / search
-postal_code = st.text_input("Postal Code", placeholder="e.g. 9000")
+import ast
+import pandas as pd
 
+# Load your municipality→postal mapping file
+with open("message.txt", "r", encoding="utf-8") as f:
+    muni_to_postal = ast.literal_eval(f.read())
+
+# Reverse mapping: postal_code → list of municipalities
+postal_to_municipalities = {}
+for muni, codes in muni_to_postal.items():
+    nice_name = muni.title()  # Beautify display name
+    for code in codes:
+        postal_to_municipalities.setdefault(code, []).append(nice_name)
+
+
+st.subheader("Place of Property")
+
+# User postal input
+postal_input = st.text_input("Postal Code", placeholder="e.g. 9000")
+
+postal_code = None
+municipalities = []
+municipality = None
 province = None
 region = None
 
-# Detect province + region from postal code if valid
-if postal_code.isdigit() and 1000 <= int(postal_code) <= 9999:
-    postal_code = int(postal_code)
+# Validate + lookup
+if postal_input.isdigit() and 1000 <= int(postal_input) <= 9999:
+    postal_code = int(postal_input)
+    
+    # Lookup municipality
+    municipalities = postal_to_municipalities.get(postal_code, [])
+    if len(municipalities) == 1:
+        municipality = municipalities[0]
+    elif len(municipalities) > 1:
+        municipality = st.selectbox("Municipality", options=municipalities)
+    
+    # Lookup province via ranges
     province = next(
         (prov for prov, codes in postal_to_province.items() if postal_code in codes),
         None
     )
     if province:
         region = province_to_region[province]
-    else:
-        st.error("Unknown postal code. Please check again.")
-
 else:
-    st.info("Enter a valid Belgian postal code (1000–9999)")
+    st.info("Enter a valid Belgian postal code (1000–9999).")
 
-# Let user toggle to override auto location
+
+# Allow user to correct mismatches manually
 manual_override = st.checkbox("Edit location details manually")
 
 if manual_override:
-    # Manual override selectors
+    # Region override
     region_list = list(region_to_provinces.keys())
     region = st.selectbox(
-        "Region (manual override)", 
-        options=region_list,
+        "Region",
+        region_list,
         index=region_list.index(region) if region in region_list else 0
     )
+
+    # Province filtered by region
     province_list = region_to_provinces[region]
     province = st.selectbox(
-        "Province (manual override)", 
-        options=province_list,
+        "Province",
+        province_list,
         index=province_list.index(province) if province in province_list else 0
     )
 else:
-    if region and province:
-        st.success(f"Located in: {region} → {province}")
-    else:
-        st.warning("Province & Region will be set once the postal code is valid.")
+    # Show auto results when ready
+    if postal_code and region and province:
+        if municipality:
+            st.success(f"{municipality} in {province}, {region}")
+        else:
+            st.warning("Municipality not found in list — adjust manually if needed.")
+
 st.subheader("Types of Property")
 
 type_list = list(type_to_subtypes.keys())
